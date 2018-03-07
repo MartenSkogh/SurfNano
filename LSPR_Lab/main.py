@@ -1,9 +1,139 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+from __future__ import division
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import rc
 from pprint import pprint
+
+def find_fwhm(xdata, ydata):
+    peak_idx = np.argmax(ydata)
+    hm = ydata[peak_idx]/2
+    min_fw_idx = np.argmin(np.abs(ydata[:peak_idx] - hm))
+    max_fw_idx = np.argmin(np.abs(ydata[peak_idx:] - hm)) + peak_idx  
+
+    fw = np.abs(xdata[min_fw_idx]-xdata[max_fw_idx])
+
+    min_fw = (xdata[min_fw_idx], ydata[min_fw_idx])
+    max_fw = (xdata[max_fw_idx], ydata[max_fw_idx])
+    
+    return min_fw, max_fw
+    
+def extract_from_xml(filename):
+    X_set = []
+    Y_set = []
+    X = []
+    Y = []
+    in_data = False
+    with open(filename, 'r') as f:
+        for line in f:
+            if '<data>' in line:
+                in_data = True
+                data_str = line.split('>')[1]
+                values = data_str.split('\t')
+                X.append(float(values[0]))
+                Y.append(float(values[1]))
+            elif '</data>' in line:
+                in_data = False
+                data_str = line.split('<')[0]
+                values = data_str.split('\t')
+                values = data_str.split('\t')
+                X.append(float(values[0]))
+                Y.append(float(values[1]))
+                X_set.append(np.array(X))
+                Y_set.append(np.array(Y))
+                X = []
+                Y = []
+            elif in_data:
+                values = line.split('\t')
+                X.append(float(values[0]))
+                Y.append(float(values[1]))
+                
+    return X_set, Y_set
+
 
 print('Starting calculations...')
 
+# Doing calculations for the unknown samples
+# First measurement is a calibration run with only clean glass
+
+# Load all measurement data, including the baseline run
+trans_data = np.genfromtxt('data/trans_data.csv', delimiter=',')
+trans_data = trans_data[:,:-1].T
+
+# Remove the baseline and the two bonus measurements
+trans_data = trans_data[2:-4,:]
+
+trans_x = trans_data[::2,:]
+trans_y = 100-trans_data[1::2,:]
+
+# Find peaks and FWHM
+peak_idx = [np.argmax(data) for data in trans_y]
+fwhm_list = []
+peak_list = []
+
+for x, y, i in zip(trans_x, trans_y, peak_idx):
+    idx = find_fwhm(x, y)
+    fwhm = x[idx[1][0]] - x[idx[0][0]]
+    fwhm_list.append(fwhm)
+    peak_list.append(y[i])
+
+pprint(peak_list)
+pprint(fwhm_list)
+
+# Plot stuff
+plt.rc('text', usetex=True)
+plt.rc('font', family='serif')
+
+plt.figure()
+plt.title('Adsorption Spectrum')
+plt.xlabel('Wavelength [nm]')
+plt.ylabel('Adsorption [\%]')
+ax = plt.axes()
+n = 1
+for x, y, i in zip(trans_x, trans_y, peak_idx):
+    plt.plot(x,y, label='Measurement {0}'.format(n), linewidth=2)
+    fw = find_fwhm(x, y)
+    ax.annotate('', xy=fw[0], xytext=fw[1], arrowprops=dict(arrowstyle='<->'))
+    #plt.plot(fw[0], fw[1], 'b-o')
+    n += 1
+
+
+    
+plt.plot([x[i] for x, i in zip(trans_x,peak_idx)],
+         [y[i] for y, i in zip(trans_y,peak_idx)],
+         'rd', label='Peaks')
+    
+plt.legend(loc='upper right')
+plt.savefig('Images/measurement_data.png')
+
+
+# Data processing for the liquid interface measurement
+
+philip_data = np.genfromtxt('data/peak_pos.txt')
+philip_x = philip_data[:,0]
+philip_y = philip_data[:,1]
+
+pprint(philip_x)
+pprint(philip_y)
+
+plt.figure()
+plt.title('Adsorption Spectrum')
+plt.xlabel('Time [s]')
+plt.ylabel('Adsorption [\%]')
+plt.grid(True)
+plt.plot(philip_x,philip_y, linewidth=2)
+
+plt.savefig('Images/liquid_interface.png')
+
+X_set, Y_set = extract_from_xml('data/skalman_lspr.inr')
+
+plt.figure()
+plt.title('Adsorption')
+plt.xlabel('Wavelength [nm]')
+plt.ylabel('Transmission [\%]')
+for x, y in zip(X_set, Y_set):
+    plt.plot(x,y)
+
+plt.show()
